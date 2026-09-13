@@ -275,3 +275,361 @@ numbersBtn.addEventListener("click", () => {
   numbersBtn.classList.toggle("active", state.numbers);
   resetTest();
 });
+
+/* =========================================================
+   TEST LIFECYCLE
+   ========================================================= */
+
+function buildInitialWords() {
+  if (state.mode === "quote") {
+    const quote = QUOTES[Math.floor(Math.random() * QUOTES.length)];
+    state.words = quote.split(" ");
+  } else if (state.mode === "words" || state.mode === "custom") {
+    state.words = generateText(state.amount);
+  } else if (state.mode === "zen") {
+    state.words = generateText(30); // zen shows a soft backdrop of words; freeform stats still tracked
+  } else {
+    // time mode: generate a generous initial batch, more appended as needed
+    state.words = generateText(60);
+  }
+}
+
+function resetTest() {
+  clearInterval(state.timerInterval);
+  state.timerInterval = null;
+  state.started = false;
+  state.finished = false;
+  state.startTime = null;
+  state.currentIndex = 0;
+  state.typed = [];
+  state.stats = { correct: 0, incorrect: 0, extra: 0, missed: 0 };
+  state.timeLeft = state.mode === "time" ? state.amount : 0;
+
+  resultsOverlay.classList.remove("show");
+  typeAreaEl.classList.remove("blurred");
+
+  // the previous test may have scrolled the word box down as the user
+  // progressed through lines — snap it back to the top before drawing
+  // the new text, otherwise the new words render mid-scroll and get
+  // clipped by the fixed-height overflow:hidden wrapper.
+  wordsWrapperEl.scrollTop = 0;
+
+  buildInitialWords();
+  renderAllWords();
+  wordsWrapperEl.scrollTop = 0;
+  updateCaret();
+
+  // fresh test, nothing typed yet — caret should idle-blink right away
+  clearTimeout(caretIdleTimer);
+  caretEl.style.animation = "caret-blink 1s steps(1) infinite";
+  updateLiveStats();
+
+  hiddenInput.value = "";
+  focusInput();
+}
+
+function focusInput() {
+  hiddenInput.focus({ preventScroll: true });
+}
+
+function startTestIfNeeded() {
+  if (state.started || state.finished) return;
+  state.started = true;
+  state.startTime = Date.now();
+
+  if (state.mode === "time") {
+    state.timerInterval = setInterval(() => {
+      state.timeLeft -= 1;
+      updateLiveStats();
+      if (state.timeLeft <= 0) {
+        endTest();
+      }
+    }, 1000);
+  }
+}
+
+function updateLiveStats() {
+  if (state.mode === "time") {
+    liveStatsEl.textContent = state.started ? String(Math.max(0, state.timeLeft)) : String(state.amount);
+  } else if (state.mode === "words" || state.mode === "custom") {
+    liveStatsEl.textContent = `${state.currentIndex}/${state.words.length}`;
+  } else if (state.mode === "quote") {
+    liveStatsEl.textContent = `${state.currentIndex}/${state.words.length}`;
+  } else {
+    liveStatsEl.textContent = state.started ? "zen" : "";
+  }
+}
+
+/* Finalize scoring for one word once it's left behind (space pressed or test end) */
+function finalizeWord(index) {
+  const target = state.words[index] ?? "";
+  const typed = state.typed[index] ?? "";
+  const max = Math.max(target.length, typed.length);
+  for (let i = 0; i < max; i++) {
+    if (i < typed.length && i < target.length) {
+      if (typed[i] === target[i]) state.stats.correct++;
+      else state.stats.incorrect++;
+    } else if (i < typed.length) {
+      state.stats.extra++;
+    } else {
+      state.stats.missed++;
+    }
+  }
+}
+
+function endTest() {
+  if (state.finished) return;
+  state.finished = true;
+  clearInterval(state.timerInterval);
+
+  // finalize the word currently being typed (partial credit) if it has content
+  if (state.typed[state.currentIndex] !== undefined) {
+    finalizeWord(state.currentIndex);
+  }
+
+  showResults();
+}
+
+function showResults() {
+  const elapsedMs = state.startTime ? Date.now() - state.startTime : 0;
+  const elapsedSeconds = Math.max(elapsedMs / 1000, 0.5);
+  const minutes = elapsedSeconds / 60;
+
+  const { correct, incorrect, extra, missed } = state.stats;
+  const totalTyped = correct + incorrect + extra;
+
+  const wpm = Math.round((correct / 5) / minutes) || 0;
+  const raw = Math.round((totalTyped / 5) / minutes) || 0;
+  const acc = totalTyped > 0 ? Math.round((correct / totalTyped) * 1000) / 10 : 0;
+
+  resWpm.textContent = wpm;
+  resRaw.textContent = raw;
+  resAcc.textContent = `${acc}%`;
+  resChars.textContent = `${correct}/${incorrect}/${extra}/${missed}`;
+  resTime.textContent = `${Math.round(elapsedSeconds)}s`;
+
+  let modeLabel = state.mode;
+  if (state.mode === "time" || state.mode === "words") modeLabel = `${state.mode} ${state.amount}`;
+  resMode.textContent = modeLabel;
+
+  resultsOverlay.classList.add("show");
+}
+
+/* =========================================================
+   CARET + SCROLL
+   ========================================================= */
+
+function updateCaret() {
+  const current = state.wordElements[state.currentIndex];
+  if (!current) return;
+  const typedLen = (state.typed[state.currentIndex] || "").length;
+
+  let rect;
+  if (typedLen < current.chars.length) {
+    rect = current.chars[typedLen].getBoundingClientRect();
+  } else if (current.chars.length > 0) {
+    const last = current.chars[current.chars.length - 1].getBoundingClientRect();
+    rect = { left: last.right, top: last.top, height: last.height };
+  } else {
+    rect = current.el.getBoundingClientRect();
+  }
+
+  const wrapperRect = wordsWrapperEl.getBoundingClientRect();
+  caretEl.style.left = (rect.left - wrapperRect.left + wordsWrapperEl.scrollLeft) + "px";
+  caretEl.style.top = (rect.top - wrapperRect.top + wordsWrapperEl.scrollTop) + "px";
+  caretEl.style.height = rect.height + "px";
+
+  scrollToCurrentLine();
+}
+
+function scrollToCurrentLine() {
+  const current = state.wordElements[state.currentIndex];
+  if (!current) return;
+  const wrapperRect = wordsWrapperEl.getBoundingClientRect();
+  const wordRect = current.el.getBoundingClientRect();
+  const relativeTop = wordRect.top - wrapperRect.top + wordsWrapperEl.scrollTop;
+  const lineHeight = wordRect.height;
+
+  // keep the active line within the first visible line-and-a-half of the viewport
+  const maxVisible = lineHeight * 1.4;
+  if (relativeTop > maxVisible) {
+    wordsWrapperEl.scrollTop = relativeTop - lineHeight * 0.4;
+  } else if (relativeTop < 0) {
+    wordsWrapperEl.scrollTop = Math.max(0, relativeTop);
+  }
+}
+
+/* =========================================================
+   RENDER CURRENT WORD (per keystroke)
+   ========================================================= */
+
+function renderCurrentWord() {
+  const current = state.wordElements[state.currentIndex];
+  if (!current) return;
+  const target = state.words[state.currentIndex];
+  const typed = state.typed[state.currentIndex] || "";
+
+  // update / create char spans for target length + any extra typed chars
+  const maxLen = Math.max(target.length, typed.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    let span = current.chars[i];
+    if (!span) {
+      // extra character typed beyond the target word — create a new span
+      span = document.createElement("span");
+      span.className = "char extra";
+      span.textContent = typed[i];
+      current.el.appendChild(span);
+      current.chars[i] = span;
+      continue;
+    }
+    if (i >= target.length) continue; // handled above on creation
+
+    if (i < typed.length) {
+      span.classList.toggle("correct", typed[i] === target[i]);
+      span.classList.toggle("incorrect", typed[i] !== target[i]);
+    } else {
+      span.classList.remove("correct", "incorrect");
+    }
+  }
+
+  // remove any leftover extra spans if user backspaced them away
+  while (current.chars.length > Math.max(target.length, typed.length)) {
+    const removed = current.chars.pop();
+    removed.remove();
+  }
+
+  updateCaret();
+}
+
+/* =========================================================
+   INPUT HANDLING
+   ========================================================= */
+
+function moveToNextWord() {
+  finalizeWord(state.currentIndex);
+
+  state.wordElements[state.currentIndex].el.classList.remove("current-word");
+  state.currentIndex++;
+
+  const isWordLimited = state.mode === "words" || state.mode === "custom" || state.mode === "quote";
+  if (isWordLimited && state.currentIndex >= state.words.length) {
+    updateLiveStats();
+    endTest();
+    return;
+  }
+
+  // keep a healthy buffer of upcoming words for time-based & zen modes
+  if ((state.mode === "time" || state.mode === "zen") && state.currentIndex > state.words.length - 15) {
+    appendMoreWords(40);
+  }
+
+  state.wordElements[state.currentIndex].el.classList.add("current-word");
+  updateLiveStats();
+  updateCaret();
+}
+
+function handleCharacterInput(char) {
+  if (state.finished) return;
+  startTestIfNeeded();
+
+  const idx = state.currentIndex;
+  state.typed[idx] = (state.typed[idx] || "") + char;
+  renderCurrentWord();
+  updateLiveStats();
+
+  // zen mode: end test manually only (no auto end), other modes just keep going
+}
+
+function handleSpace() {
+  if (state.finished) return;
+  startTestIfNeeded();
+
+  const idx = state.currentIndex;
+  if (!state.typed[idx]) return; // ignore space with nothing typed
+  moveToNextWord();
+}
+
+function handleBackspace(ctrlKey) {
+  if (state.finished) return;
+  const idx = state.currentIndex;
+  const typed = state.typed[idx] || "";
+
+  if (typed.length > 0) {
+    state.typed[idx] = ctrlKey ? "" : typed.slice(0, -1);
+    renderCurrentWord();
+    return;
+  }
+
+  // move back into the previous word if it wasn't perfectly correct (monkeytype-style correction)
+  if (idx > 0) {
+    const prevTyped = state.typed[idx - 1] || "";
+    const prevTarget = state.words[idx - 1] || "";
+    if (prevTyped !== prevTarget) {
+      state.wordElements[idx].el.classList.remove("current-word");
+      state.currentIndex--;
+      state.wordElements[state.currentIndex].el.classList.add("current-word");
+      renderCurrentWord();
+      updateLiveStats();
+    }
+  }
+}
+
+hiddenInput.addEventListener("keydown", (e) => {
+  if (state.finished) return;
+
+  if (e.key === " ") {
+    e.preventDefault();
+    markCaretActive();
+    handleSpace();
+  } else if (e.key === "Backspace") {
+    e.preventDefault();
+    markCaretActive();
+    handleBackspace(e.ctrlKey || e.metaKey);
+  } else if (e.key === "Enter") {
+    if (state.mode === "zen") {
+      e.preventDefault();
+      endTest();
+    }
+  } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    markCaretActive();
+    handleCharacterInput(e.key);
+  }
+});
+
+// keep hidden input focused whenever the user clicks the typing area
+typeAreaEl.addEventListener("click", focusInput);
+document.addEventListener("click", (e) => {
+  if (!resultsOverlay.classList.contains("show") && !e.target.closest(".topbar")) {
+    focusInput();
+  }
+});
+
+typeAreaEl.addEventListener("focusin", () => typeAreaEl.classList.remove("blurred"));
+hiddenInput.addEventListener("blur", () => {
+  if (!state.finished) typeAreaEl.classList.add("blurred");
+});
+
+/* prevent page from scrolling on space bar globally */
+window.addEventListener("keydown", (e) => {
+  if (e.key === " " && document.activeElement === hiddenInput) {
+    e.preventDefault();
+  }
+});
+
+/* =========================================================
+   RESTART / NEXT TEST
+   ========================================================= */
+
+restartBtn.addEventListener("click", resetTest);
+nextTestBtn.addEventListener("click", resetTest);
+
+window.addEventListener("resize", updateCaret);
+
+/* =========================================================
+   INIT
+   ========================================================= */
+
+renderAmountButtons();
+resetTest();
