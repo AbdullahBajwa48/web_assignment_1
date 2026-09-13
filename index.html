@@ -53,6 +53,37 @@
       </button>
     </header>
 
+     <!-- LANGUAGE INDICATOR -->
+    <div class="lang-row">
+      <button class="lang-btn">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20 15.3 15.3 0 010-20z"/></svg>
+        english
+      </button>
+    </div>
+
+    <!-- LIVE STATS (timer / word count while typing) -->
+    <div class="live-stats" id="liveStats"></div>
+
+    <!-- TYPING AREA -->
+    <main class="type-area" id="typeArea">
+      <div class="words-wrapper" id="wordsWrapper">
+        <div class="words" id="words" tabindex="0"></div>
+      </div>
+    </main>
+
+    <!-- HIDDEN INPUT TO CAPTURE KEYSTROKES ON MOBILE -->
+    <input type="text" id="hiddenInput" class="hidden-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+
+    <!-- RESTART -->
+    <div class="restart-row">
+      <button class="restart-btn" id="restartBtn" title="restart test">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="1 4 1 10 7 10"/>
+          <path d="M3.51 15a9 9 0 102.13-9.36L1 10"/>
+        </svg>
+      </button>
+    </div>
+
 
     
 
